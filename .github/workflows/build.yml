@@ -379,6 +379,105 @@ jobs:
               error(f"Injection failed: {e}")
           EOF
 
+      # 建议处理掉segment的遥测数据
+      - name: Clear Segment Keys
+        if: steps.version_check.outputs.skip_build == 'false'
+        run: |
+          echo "🔑 Clearing segment keys after injection..."
+
+          python3 << 'EOF'
+          import os, sys, re
+          from pathlib import Path
+
+          def log(msg):
+              print(f"[INFO] {msg}")
+
+          def error(msg):
+              print(f"[ERROR] {msg}")
+              sys.exit(1)
+
+          # 要清空的segment密钥
+          SEGMENT_KEYS = [
+              "eRx2DEU2tx5boyRfgRnotNsTDKhkykS8",
+              "ki6UFHBqWCiflWcrR6BWiVUeEIVXLdkg"
+          ]
+
+          try:
+              # 查找所有可能包含segment密钥的文件
+              unpacked = Path('unpacked_ext')
+
+              # 搜索模式：JavaScript文件、JSON文件、配置文件等
+              file_patterns = [
+                  '**/*.js',
+                  '**/*.json',
+                  '**/*.ts',
+                  '**/*.config',
+                  '**/*.env'
+              ]
+
+              files_processed = 0
+              keys_cleared = 0
+
+              for pattern in file_patterns:
+                  for file_path in unpacked.glob(pattern):
+                      if file_path.is_file():
+                          try:
+                              # 读取文件内容
+                              content = file_path.read_text(encoding='utf-8', errors='ignore')
+                              original_content = content
+
+                              # 检查并替换每个segment密钥
+                              for key in SEGMENT_KEYS:
+                                  if key in content:
+                                      log(f"Found segment key {key[:8]}... in {file_path.relative_to(unpacked)}")
+
+                                      # 替换密钥为空字符串或占位符
+                                      # 使用多种可能的替换模式
+                                      patterns = [
+                                          # 直接字符串替换
+                                          (key, ''),
+                                          # 引号包围的字符串
+                                          (f'"{key}"', '""'),
+                                          (f"'{key}'", "''"),
+                                          # 配置值形式
+                                          (f'= "{key}"', '= ""'),
+                                          (f"= '{key}'", "= ''"),
+                                          (f': "{key}"', ': ""'),
+                                          (f": '{key}'", ": ''"),
+                                          # 环境变量形式
+                                          (f'{key}', ''),
+                                      ]
+
+                                      for old_pattern, new_pattern in patterns:
+                                          if old_pattern in content:
+                                              content = content.replace(old_pattern, new_pattern)
+                                              keys_cleared += 1
+                                              log(f"Cleared pattern: {old_pattern[:20]}...")
+
+                              # 如果内容有变化，写回文件
+                              if content != original_content:
+                                  file_path.write_text(content, encoding='utf-8')
+                                  files_processed += 1
+                                  log(f"Updated file: {file_path.relative_to(unpacked)}")
+
+                          except Exception as file_error:
+                              log(f"Warning: Could not process {file_path}: {file_error}")
+                              continue
+
+              log(f"✅ Segment key clearing completed")
+              log(f"📁 Files processed: {files_processed}")
+              log(f"🔑 Key instances cleared: {keys_cleared}")
+
+              if keys_cleared == 0:
+                  log("ℹ️  No segment keys found in the extension files")
+              else:
+                  log(f"🧹 Successfully cleared {keys_cleared} segment key instances")
+
+          except Exception as e:
+              error(f"Segment key clearing failed: {e}")
+          EOF
+
+
       - name: Update package.json commands
         if: steps.version_check.outputs.skip_build == 'false'
         run: |
